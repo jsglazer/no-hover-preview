@@ -198,7 +198,20 @@ function observeDoc(doc) {
 // A link click reaches the view synchronously. PDF: a pointerup handler calls view.navigate() for internal links/citations, or view._onOpenLink(url) for web links. EPUB/snapshot: a click handler calls view.navigate({href}) or view._options.onOpenLink(url). We wrap those on each view instance and block only when the event currently being dispatched is a pointer click whose target is inside that view's page document and the navigation modifier isn't held. Sidebar outline/annotation jumps, keyboard navigation, back/forward and the link context menu's "Open link" run outside such an event, so they still work.
 
 const CLICK_EVENTS = ["pointerup", "mouseup", "click"];
+const CLICK_WINDOW_MS = 150; // a recorded click counts for navigation calls made within this long (the view handles it synchronously)
 
+// Window references reach us through different wrappers (Xray from reader._iframeWindow, waived from the internal reader's objects). Wrapper identity differs for the same window, so compare the underlying objects.
+function sameObject(a, b) {
+  if (!a || !b) return false;
+  try {
+    const Cu = Components.utils;
+    return Cu.waiveXrays(a) === Cu.waiveXrays(b);
+  } catch (e) {
+    return a === b;
+  }
+}
+
+// Signal 1: the event currently being dispatched (window.event), if it is a click inside this view's page document.
 function currentViewClick(view, readerWin) {
   let viewWin = null;
   try {
@@ -219,7 +232,7 @@ function currentViewClick(view, readerWin) {
     try {
       const t = ev.target;
       const doc = t && (t.ownerDocument || t.document || t);
-      if (doc && doc.defaultView === viewWin) return ev;
+      if (doc && sameObject(doc.defaultView, viewWin)) return ev;
     } catch (e) {
       /* ignore */
     }
@@ -227,10 +240,12 @@ function currentViewClick(view, readerWin) {
   return null;
 }
 
-function shouldBlockNav(view, readerWin, kind) {
+function shouldBlockNav(view, readerWin, kind, state) {
   if (!getPref("nav.enabled")) return false;
   if (getPref(kind === "external" ? "nav.external" : "nav.internal") === false) return false;
-  const ev = currentViewClick(view, readerWin);
+  // Signal 2: a click our own capture listener saw on the view's window just now.
+  let ev = currentViewClick(view, readerWin);
+  if (!ev && state.lastClick && Date.now() - state.lastClick.time < CLICK_WINDOW_MS) ev = state.lastClick;
   if (!ev) return false;
   const mod = OVERRIDE_KEYS[getPref("nav.key")];
   if (mod && ev[mod[1]]) return false;
@@ -238,21 +253,66 @@ function shouldBlockNav(view, readerWin, kind) {
   return true;
 }
 
+// Capture listener on the view's page window that records each click with its modifier state. It runs before the view's own handlers, which navigate synchronously.
+function hookViewWindow(view, state) {
+  let w = null;
+  try {
+    w = view._iframeWindow;
+  } catch (e) {
+    return;
+  }
+  if (!w || sameObject(w, state.hookedWin)) return;
+  const record = (e) => {
+    state.lastClick = { time: Date.now(), shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey };
+  };
+  const clear = () => {
+    state.lastClick = null;
+  };
+  try {
+    for (const t of CLICK_EVENTS) w.addEventListener(t, record, true);
+    w.addEventListener("pointerdown", clear, true); // a new press never inherits a previous click
+    if (state.unhook) state.unhook();
+    state.hookedWin = w;
+    state.unhook = () => {
+      try {
+        for (const t of CLICK_EVENTS) w.removeEventListener(t, record, true);
+        w.removeEventListener("pointerdown", clear, true);
+      } catch (e) {
+        /* window gone */
+      }
+    };
+  } catch (e) {
+    log("hookViewWindow failed: " + e);
+  }
+}
+
 function wrapView(view, readerWin) {
   try {
     if (!view || view.__noHoverPreviewNav) return;
     const exp = (fn) => Components.utils.exportFunction(fn, readerWin);
+    const state = { lastClick: null, hookedWin: null, unhook: null };
+    // The page iframe loads asynchronously; hook it now if ready, once the view initializes, and on any later call.
+    hookViewWindow(view, state);
+    try {
+      if (view.initializedPromise) view.initializedPromise.then(exp(() => hookViewWindow(view, state)));
+    } catch (e) {
+      /* ignore */
+    }
+    const guard = (kind) => {
+      hookViewWindow(view, state);
+      return shouldBlockNav(view, readerWin, kind, state);
+    };
     const origNavigate = view.navigate;
     if (typeof origNavigate === "function") {
       view.navigate = exp(function (location, options) {
-        if (shouldBlockNav(view, readerWin, "internal")) return undefined;
+        if (guard("internal")) return undefined;
         return origNavigate.call(view, location, options);
       });
     }
     const origPdfOpen = view._onOpenLink; // PDF view
     if (typeof origPdfOpen === "function") {
       view._onOpenLink = exp(function (url) {
-        if (shouldBlockNav(view, readerWin, "external")) return undefined;
+        if (guard("external")) return undefined;
         return origPdfOpen.call(view, url);
       });
     }
@@ -260,16 +320,18 @@ function wrapView(view, readerWin) {
     const origDomOpen = opts && opts.onOpenLink;
     if (typeof origDomOpen === "function") {
       opts.onOpenLink = exp(function (url) {
-        if (shouldBlockNav(view, readerWin, "external")) return undefined;
+        if (guard("external")) return undefined;
         return origDomOpen.call(opts, url);
       });
     }
     view.__noHoverPreviewNav = exp(function () {
       // restorer, called on shutdown
+      if (state.unhook) state.unhook();
       delete view.navigate;
       if (typeof origPdfOpen === "function") view._onOpenLink = origPdfOpen;
       if (typeof origDomOpen === "function") opts.onOpenLink = origDomOpen;
     });
+    log("wrapped view; page window " + (state.hookedWin ? "hooked" : "pending"));
   } catch (e) {
     log("wrapView failed: " + e);
   }

@@ -8,7 +8,8 @@ const prefs = { [P + "enabled"]: true, [P + "block.internalLink"]: true, [P + "b
 
 const ctx = {
   Zotero: { Prefs: { get: (k) => prefs[k] }, debug: () => {}, Reader: { _readers: [] } },
-  Components: { utils: { exportFunction: (f) => f } },
+  // waiveXrays maps a fake "Xray" wrapper ({__waived: obj}) to the underlying object, like Firefox's distinct wrappers for one window
+  Components: { utils: { exportFunction: (f) => f, waiveXrays: (o) => (o && o.__waived) || o } },
 };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(new URL("../addon/bootstrap.js", import.meta.url), "utf8"), ctx);
@@ -47,8 +48,10 @@ class FakeView {
   constructor(win) { this._iframeWindow = win; this._onOpenLink = (url) => calls.push("pdf-open:" + url); this._options = { onOpenLink: (url) => calls.push("dom-open:" + url) }; }
   navigate(loc) { calls.push("nav:" + loc); }
 }
-const viewWin = { event: undefined };
-const viewDoc = { defaultView: viewWin };
+const viewWin = fakeWindow();
+viewWin.event = undefined;
+// The event's target reaches the plugin through an Xray, so its defaultView is a *different wrapper* of viewWin (the bug in 1.0.2)
+const viewDoc = { defaultView: { __waived: viewWin } };
 class InternalReader {
   constructor() { this.state = {}; this._primaryView = new FakeView(viewWin); }
   _updateState(s) { this.state = { ...this.state, ...s }; }
@@ -123,6 +126,21 @@ viewWin.event = click(); // event exposed on the view window instead
 view.navigate("p6");
 assert.deepEqual(calls, [], "detects the click via the view window too");
 viewWin.event = undefined;
+// signal 2: no window.event at all, only our own capture listener on the page window
+iframeWin.event = undefined;
+viewWin.fire("pointerdown", {});
+viewWin.fire("pointerup", { shiftKey: false });
+view.navigate("p6b");
+assert.deepEqual(calls, [], "recorded plain click blocks even without window.event");
+viewWin.fire("pointerdown", {});
+viewWin.fire("pointerup", { shiftKey: true });
+view.navigate("p6c");
+assert.deepEqual(calls, ["nav:p6c"], "recorded shift-click follows");
+calls.length = 0;
+viewWin.fire("pointerdown", {});
+view.navigate("p6d");
+assert.deepEqual(calls, ["nav:p6d"], "pointerdown clears the recorded click");
+calls.length = 0;
 prefs[P + "nav.external"] = false;
 iframeWin.event = click();
 view._onOpenLink("http://c"); view.navigate("p7");
@@ -133,7 +151,7 @@ view.navigate("p8");
 assert.deepEqual(calls, ["nav:p8"], "block navigation off");
 calls.length = 0;
 prefs[P + "nav.enabled"] = true;
-const split = ir._createView(false);
+const split = (ir._secondaryView = ir._createView(false)); // the real reader stores it here
 split.navigate("p9");
 assert.deepEqual(calls, [], "views created later (split view) are wrapped too");
 iframeWin.event = undefined;
@@ -151,6 +169,7 @@ fn("shutdown")();
 assert.equal(Object.hasOwn(ir, "_updateState"), false, "shutdown restores prototype method");
 assert.equal(Object.hasOwn(ir, "_createView"), false, "shutdown restores _createView");
 assert.equal(Object.hasOwn(view, "navigate"), false, "shutdown unwraps view.navigate");
+assert.equal((viewWin.listeners.pointerup || []).length, 0, "shutdown removes page-window click listeners");
 iframeWin.event = click();
 view._onOpenLink("http://d");
 assert.deepEqual(calls, ["pdf-open:http://d"], "shutdown restores _onOpenLink");
