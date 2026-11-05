@@ -4,6 +4,8 @@ A Zotero 7+ plugin that stops the built-in reader from popping up preview boxes 
 
 Clicking a link still takes you to its target. Only the hover popup is suppressed.
 
+Want to peek at one? **Hold Option ⌥ (Alt on Windows/Linux)** while hovering over a link, or press it while you're already hovering, and the preview appears. A preview shown this way stays open, so you can move into it and scroll, until you move off it. The next hover is hidden again.
+
 Background: [Zotero forums: Disable the pop-up window when hovering over citation links](https://forums.zotero.org/discussion/116479/disable-the-pop-up-window-when-hovering-over-citation-links).
 
 ## Install
@@ -22,11 +24,16 @@ Background: [Zotero forums: Disable the pop-up window when hovering over citatio
 | References | Bibliography entry popups |
 | Footnotes | EPUB / web snapshot footnote popups |
 
-All are on by default. Changes take effect immediately, with no restart.
+All are on by default. **Hold to show previews** picks the override key: Option/Alt (default), Shift, Control, Command/Win, or None to never show them. Changes take effect immediately, with no restart.
+
+On Windows, tapping and releasing Alt by itself can focus the menu bar, so pick Shift or Control there if that gets in the way.
 
 ## How it works
 
-Every hover popup in the reader goes through the internal reader's `_updateState({ primaryViewOverlayPopup | secondaryViewOverlayPopup })`, tagged with a `type` (`internal-link`, `citation`, `reference`, `footnote`). The plugin wraps `_updateState` on each open reader and drops popups of the blocked types before they render. As a fallback, if a future Zotero version changes that path, it also injects a stylesheet into the reader that hides the matching popup classes (`.preview-popup`, `.citation-popup`, `.reference-popup`, `.footnote-popup`).
+Every hover popup in the reader goes through the internal reader's `_updateState({ primaryViewOverlayPopup | secondaryViewOverlayPopup })`, tagged with a `type` (`internal-link`, `citation`, `reference`, `footnote`), and renders as an element with a matching class (`.preview-popup`, `.citation-popup`, `.reference-popup`, `.footnote-popup`).
+
+- **With an override key (default):** popups open as normal, but a stylesheet injected into the reader hides them unless the reader's root has the `nhp-reveal` class. Holding the key adds that class. When it's released, a popup that's already showing stays visible until Zotero closes it, then the class clears. Zotero's own open and close timing stays intact.
+- **With the override set to None:** the plugin wraps `_updateState` on each reader and drops blocked popups before they render, so no preview image is ever drawn. The stylesheet stays on as a fallback.
 
 Disabling or removing the plugin restores the original behaviour in open readers without a restart.
 

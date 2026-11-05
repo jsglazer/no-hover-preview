@@ -8,6 +8,19 @@
       <checkbox id="nhp-reference" label="References (bibliography entry popups)" preference="extensions.zotero.nohoverpreview.block.reference"/>
       <checkbox id="nhp-footnote" label="Footnotes (EPUB / snapshot footnote popups)" preference="extensions.zotero.nohoverpreview.block.footnote"/>
     </vbox>
+    <hbox align="center" style="margin-top: 8px;">
+      <label value="Hold to show previews:"/>
+      <menulist id="nhp-override" preference="extensions.zotero.nohoverpreview.override.key">
+        <menupopup>
+          <menuitem label="Option ⌥ / Alt" value="alt"/>
+          <menuitem label="Shift ⇧" value="shift"/>
+          <menuitem label="Control ⌃ / Ctrl" value="ctrl"/>
+          <menuitem label="Command ⌘ / Win" value="meta"/>
+          <menuitem label="None (never show)" value="none"/>
+        </menupopup>
+      </menulist>
+    </hbox>
+    <description>Hold the key while hovering a link (or press it while already hovering) to see its preview. A preview shown this way stays open until you move off it.</description>
     <description style="margin-top: 8px;">Clicking a link still navigates to its target. Changes take effect immediately.</description>
   </groupbox>
 </vbox>
