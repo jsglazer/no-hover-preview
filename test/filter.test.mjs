@@ -41,7 +41,19 @@ const doc = {
 iframeWin.document = doc;
 const chromeWin = fakeWindow();
 
-class InternalReader { constructor() { this.state = {}; } _updateState(s) { this.state = { ...this.state, ...s }; } }
+// Fake views: navigate on the prototype (as in the real classes), PDF-style _onOpenLink, DOM-style _options.onOpenLink
+const calls = [];
+class FakeView {
+  constructor(win) { this._iframeWindow = win; this._onOpenLink = (url) => calls.push("pdf-open:" + url); this._options = { onOpenLink: (url) => calls.push("dom-open:" + url) }; }
+  navigate(loc) { calls.push("nav:" + loc); }
+}
+const viewWin = { event: undefined };
+const viewDoc = { defaultView: viewWin };
+class InternalReader {
+  constructor() { this.state = {}; this._primaryView = new FakeView(viewWin); }
+  _updateState(s) { this.state = { ...this.state, ...s }; }
+  _createView() { return new FakeView(viewWin); }
+}
 const reader = { _internalReader: new InternalReader(), _iframeWindow: iframeWin, _window: chromeWin, _instanceID: "t" };
 ctx.Zotero.Reader._readers.push(reader);
 fn("patchReader")(reader);
@@ -88,6 +100,44 @@ popups.delete("preview-popup");
 fakeWindow.moCallback();
 assert.equal(classes.has("nhp-reveal"), false, "blur / mousemove resets held state");
 
+// --- navigation block ---
+Object.assign(prefs, { [P + "nav.enabled"]: true, [P + "nav.internal"]: true, [P + "nav.external"]: true, [P + "nav.key"]: "shift" });
+const view = ir._primaryView;
+const click = (extra = {}) => ({ type: "pointerup", target: { ownerDocument: viewDoc }, shiftKey: false, ...extra });
+iframeWin.event = click();
+view.navigate("p5"); view._onOpenLink("http://a"); view._options.onOpenLink("http://b");
+assert.deepEqual(calls, [], "plain click in the page: internal + web navigation blocked");
+iframeWin.event = click({ shiftKey: true });
+view.navigate("p5"); view._onOpenLink("http://a");
+assert.deepEqual(calls, ["nav:p5", "pdf-open:http://a"], "shift-click follows the link");
+calls.length = 0;
+iframeWin.event = { type: "click", target: { ownerDocument: doc } };
+view.navigate("outline");
+assert.deepEqual(calls, ["nav:outline"], "clicks in the sidebar (reader doc) still navigate");
+calls.length = 0;
+iframeWin.event = undefined;
+view.navigate("back");
+assert.deepEqual(calls, ["nav:back"], "programmatic / keyboard navigation unaffected");
+calls.length = 0;
+viewWin.event = click(); // event exposed on the view window instead
+view.navigate("p6");
+assert.deepEqual(calls, [], "detects the click via the view window too");
+viewWin.event = undefined;
+prefs[P + "nav.external"] = false;
+iframeWin.event = click();
+view._onOpenLink("http://c"); view.navigate("p7");
+assert.deepEqual(calls, ["pdf-open:http://c"], "per-kind toggle: web links allowed, internal still blocked");
+calls.length = 0;
+prefs[P + "nav.enabled"] = false;
+view.navigate("p8");
+assert.deepEqual(calls, ["nav:p8"], "block navigation off");
+calls.length = 0;
+prefs[P + "nav.enabled"] = true;
+const split = ir._createView(false);
+split.navigate("p9");
+assert.deepEqual(calls, [], "views created later (split view) are wrapped too");
+iframeWin.event = undefined;
+
 // --- master switch off ---
 prefs[P + "enabled"] = false;
 fn("onPrefChange")();
@@ -99,6 +149,11 @@ assert.equal(ir.state.primaryViewOverlayPopup.type, "internal-link", "master off
 // --- shutdown ---
 fn("shutdown")();
 assert.equal(Object.hasOwn(ir, "_updateState"), false, "shutdown restores prototype method");
+assert.equal(Object.hasOwn(ir, "_createView"), false, "shutdown restores _createView");
+assert.equal(Object.hasOwn(view, "navigate"), false, "shutdown unwraps view.navigate");
+iframeWin.event = click();
+view._onOpenLink("http://d");
+assert.deepEqual(calls, ["pdf-open:http://d"], "shutdown restores _onOpenLink");
 assert.equal(styleEl, null, "shutdown removes stylesheet");
 assert.equal((chromeWin.listeners.keydown || []).length, 0, "shutdown removes key listeners");
 console.log("all tests passed");

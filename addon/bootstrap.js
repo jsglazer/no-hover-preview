@@ -1,9 +1,9 @@
-/* No Hover Preview — stops the Zotero reader's hover preview popups.
+/* No Hover Preview — stops the Zotero reader's hover preview popups, and (separately) link navigation on a plain click. See the "navigation block" section for the latter.
  *
  * Every hover popup in the reader (PDF internal-link page previews, citation/reference popups, EPUB/snapshot footnotes) is opened by the view calling onSetOverlayPopup(popup), which lands in the internal reader's `_updateState({ primaryViewOverlayPopup | secondaryViewOverlayPopup: popup })`. The popup is a React element in the reader document with a per-type class (.preview-popup, .citation-popup, ...).
  *
- * Two modes:
- * - Override key set (default: Option/Alt). Popups open as usual but a stylesheet hides them. Holding the key adds `nhp-reveal` to the reader's root, which un-hides them. Zotero keeps its own open/close timing, so a popup revealed by a tap stays visible until Zotero closes it (pointer leaves), and the reveal clears once no popup is left. A blocked popup can't be replayed later, because Zotero never reports that the pointer left a link whose popup was suppressed, so hiding beats blocking here.
+ * Preview blocking has two modes:
+ * - Override key set (default: Control). Popups open as usual but a stylesheet hides them. Holding the key adds `nhp-reveal` to the reader's root, which un-hides them. Zotero keeps its own open/close timing, so a popup revealed by a tap stays visible until Zotero closes it (pointer leaves), and the reveal clears once no popup is left. A blocked popup can't be replayed later, because Zotero never reports that the pointer left a link whose popup was suppressed, so hiding beats blocking here.
  * - Override key "none". We shadow `_updateState` and drop blocked popups before they render (no page-preview rendering at all). The stylesheet stays as a fallback in case a future Zotero renames the state keys.
  */
 
@@ -193,6 +193,109 @@ function observeDoc(doc) {
   }, { once: true });
 }
 
+// ---- navigation block ----------------------------------------------------
+//
+// A link click reaches the view synchronously. PDF: a pointerup handler calls view.navigate() for internal links/citations, or view._onOpenLink(url) for web links. EPUB/snapshot: a click handler calls view.navigate({href}) or view._options.onOpenLink(url). We wrap those on each view instance and block only when the event currently being dispatched is a pointer click whose target is inside that view's page document and the navigation modifier isn't held. Sidebar outline/annotation jumps, keyboard navigation, back/forward and the link context menu's "Open link" run outside such an event, so they still work.
+
+const CLICK_EVENTS = ["pointerup", "mouseup", "click"];
+
+function currentViewClick(view, readerWin) {
+  let viewWin = null;
+  try {
+    viewWin = view._iframeWindow;
+  } catch (e) {
+    return null;
+  }
+  if (!viewWin) return null;
+  // window.event is set on the window whose realm owns the running listener (the reader's for its own code); check both to be safe.
+  for (const w of [readerWin, viewWin]) {
+    let ev = null;
+    try {
+      ev = w.event;
+    } catch (e) {
+      /* ignore */
+    }
+    if (!ev || !CLICK_EVENTS.includes(ev.type)) continue;
+    try {
+      const t = ev.target;
+      const doc = t && (t.ownerDocument || t.document || t);
+      if (doc && doc.defaultView === viewWin) return ev;
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function shouldBlockNav(view, readerWin, kind) {
+  if (!getPref("nav.enabled")) return false;
+  if (getPref(kind === "external" ? "nav.external" : "nav.internal") === false) return false;
+  const ev = currentViewClick(view, readerWin);
+  if (!ev) return false;
+  const mod = OVERRIDE_KEYS[getPref("nav.key")];
+  if (mod && ev[mod[1]]) return false;
+  log("blocked " + kind + " link navigation");
+  return true;
+}
+
+function wrapView(view, readerWin) {
+  try {
+    if (!view || view.__noHoverPreviewNav) return;
+    const exp = (fn) => Components.utils.exportFunction(fn, readerWin);
+    const origNavigate = view.navigate;
+    if (typeof origNavigate === "function") {
+      view.navigate = exp(function (location, options) {
+        if (shouldBlockNav(view, readerWin, "internal")) return undefined;
+        return origNavigate.call(view, location, options);
+      });
+    }
+    const origPdfOpen = view._onOpenLink; // PDF view
+    if (typeof origPdfOpen === "function") {
+      view._onOpenLink = exp(function (url) {
+        if (shouldBlockNav(view, readerWin, "external")) return undefined;
+        return origPdfOpen.call(view, url);
+      });
+    }
+    const opts = view._options; // EPUB / snapshot views
+    const origDomOpen = opts && opts.onOpenLink;
+    if (typeof origDomOpen === "function") {
+      opts.onOpenLink = exp(function (url) {
+        if (shouldBlockNav(view, readerWin, "external")) return undefined;
+        return origDomOpen.call(opts, url);
+      });
+    }
+    view.__noHoverPreviewNav = exp(function () {
+      // restorer, called on shutdown
+      delete view.navigate;
+      if (typeof origPdfOpen === "function") view._onOpenLink = origPdfOpen;
+      if (typeof origDomOpen === "function") opts.onOpenLink = origDomOpen;
+    });
+  } catch (e) {
+    log("wrapView failed: " + e);
+  }
+}
+
+function unwrapView(view) {
+  try {
+    if (view && typeof view.__noHoverPreviewNav === "function") {
+      view.__noHoverPreviewNav();
+      delete view.__noHoverPreviewNav;
+    }
+  } catch (e) {
+    /* view gone */
+  }
+}
+
+function readerViews(ir) {
+  const views = [];
+  try {
+    for (const v of [ir._primaryView, ir._secondaryView, ir._lastView]) if (v && !views.includes(v)) views.push(v);
+  } catch (e) {
+    /* ignore */
+  }
+  return views;
+}
+
 // ---- reader patching -----------------------------------------------------
 
 function patchReader(reader) {
@@ -225,6 +328,17 @@ function patchReader(reader) {
       return original.call(ir, state, init);
     };
     ir._updateState = Components.utils.exportFunction(wrapper, win);
+
+    // Views are created by _createView (initially, on split view, on reload); wrap existing ones and every new one.
+    for (const v of readerViews(ir)) wrapView(v, win);
+    const originalCreateView = ir._createView;
+    if (typeof originalCreateView === "function") {
+      ir._createView = Components.utils.exportFunction(function (primary, location, opts) {
+        const view = originalCreateView.call(ir, primary, location, opts);
+        wrapView(view, win);
+        return view;
+      }, win);
+    }
     ir.__noHoverPreviewPatched = true;
     log("patched reader " + reader._instanceID);
   } catch (e) {
@@ -236,8 +350,10 @@ function unpatchReader(reader) {
   try {
     const ir = reader._internalReader;
     if (ir && ir.__noHoverPreviewPatched) {
-      // _updateState is a prototype method; deleting the own property restores it
+      // _updateState and _createView are prototype methods; deleting the own properties restores them
       delete ir._updateState;
+      delete ir._createView;
+      for (const v of readerViews(ir)) unwrapView(v);
       delete ir.__noHoverPreviewPatched;
     }
   } catch (e) {
@@ -275,6 +391,7 @@ async function startup({ version, rootURI: uri }) {
   }
 
   // Zotero.Prefs observers match exact pref names, so register one per pref
+  // nav.* prefs are read live on each click, so they need no observer
   const prefKeys = ["enabled", "override.key", ...Object.values(TYPES).map(([pref]) => pref)];
   for (const key of prefKeys) {
     prefObserverIDs.push(Zotero.Prefs.registerObserver(PREF_PREFIX + key, onPrefChange, true));

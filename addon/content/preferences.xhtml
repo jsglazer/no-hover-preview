@@ -1,26 +1,47 @@
 <vbox id="nohoverpreview-prefs">
   <groupbox>
-    <label><html:h2>No Hover Preview</html:h2></label>
-    <checkbox id="nhp-enabled" label="Block hover previews in the reader" preference="extensions.zotero.nohoverpreview.enabled"/>
+    <label><html:h2>Block preview</html:h2></label>
+    <checkbox id="nhp-enabled" label="Block preview: don't pop up previews when the mouse is over a link" preference="extensions.zotero.nohoverpreview.enabled"/>
     <vbox style="margin-inline-start: 22px;">
       <checkbox id="nhp-internal" label="Internal links (page / TOC / figure previews)" preference="extensions.zotero.nohoverpreview.block.internalLink"/>
       <checkbox id="nhp-citation" label="Citations (in-text citation → reference popups)" preference="extensions.zotero.nohoverpreview.block.citation"/>
       <checkbox id="nhp-reference" label="References (bibliography entry popups)" preference="extensions.zotero.nohoverpreview.block.reference"/>
       <checkbox id="nhp-footnote" label="Footnotes (EPUB / snapshot footnote popups)" preference="extensions.zotero.nohoverpreview.block.footnote"/>
+      <hbox align="center">
+        <label value="Show a preview when holding:"/>
+        <menulist id="nhp-override" preference="extensions.zotero.nohoverpreview.override.key">
+          <menupopup>
+            <menuitem label="Control ⌃ / Ctrl" value="ctrl"/>
+            <menuitem label="Option ⌥ / Alt" value="alt"/>
+            <menuitem label="Shift ⇧" value="shift"/>
+            <menuitem label="Command ⌘ / Win" value="meta"/>
+            <menuitem label="None (never show)" value="none"/>
+          </menupopup>
+        </menulist>
+      </hbox>
+      <description>Hold the key while the mouse is over a link to see its preview. A preview shown this way stays open until you move off it.</description>
     </vbox>
-    <hbox align="center" style="margin-top: 8px;">
-      <label value="Hold to show previews:"/>
-      <menulist id="nhp-override" preference="extensions.zotero.nohoverpreview.override.key">
-        <menupopup>
-          <menuitem label="Option ⌥ / Alt" value="alt"/>
-          <menuitem label="Shift ⇧" value="shift"/>
-          <menuitem label="Control ⌃ / Ctrl" value="ctrl"/>
-          <menuitem label="Command ⌘ / Win" value="meta"/>
-          <menuitem label="None (never show)" value="none"/>
-        </menupopup>
-      </menulist>
-    </hbox>
-    <description>Hold the key while hovering a link (or press it while already hovering) to see its preview. A preview shown this way stays open until you move off it.</description>
-    <description style="margin-top: 8px;">Clicking a link still navigates to its target. Changes take effect immediately.</description>
   </groupbox>
+  <groupbox>
+    <label><html:h2>Block navigation</html:h2></label>
+    <checkbox id="nhp-nav-enabled" label="Block navigation: clicking a link does nothing" preference="extensions.zotero.nohoverpreview.nav.enabled"/>
+    <vbox style="margin-inline-start: 22px;">
+      <checkbox id="nhp-nav-internal" label="Internal links and citations (jump to page / reference)" preference="extensions.zotero.nohoverpreview.nav.internal"/>
+      <checkbox id="nhp-nav-external" label="Web links (open in browser)" preference="extensions.zotero.nohoverpreview.nav.external"/>
+      <hbox align="center">
+        <label value="Follow a link when clicking with:"/>
+        <menulist id="nhp-nav-key" preference="extensions.zotero.nohoverpreview.nav.key">
+          <menupopup>
+            <menuitem label="Shift ⇧" value="shift"/>
+            <menuitem label="Option ⌥ / Alt" value="alt"/>
+            <menuitem label="Command ⌘ / Win" value="meta"/>
+            <menuitem label="Control ⌃ / Ctrl" value="ctrl"/>
+            <menuitem label="None (never follow)" value="none"/>
+          </menupopup>
+        </menulist>
+      </hbox>
+      <description>Outline, thumbnail and annotation jumps in the sidebar, back/forward, and right-click → Open Link are not affected. On macOS, Control-click opens the context menu, so Control isn't a good choice here.</description>
+    </vbox>
+  </groupbox>
+  <description style="margin-top: 8px;">Changes take effect immediately.</description>
 </vbox>
