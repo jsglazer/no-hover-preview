@@ -1,0 +1,13 @@
+<vbox id="nohoverpreview-prefs">
+  <groupbox>
+    <label><html:h2>No Hover Preview</html:h2></label>
+    <checkbox id="nhp-enabled" label="Block hover previews in the reader" preference="extensions.zotero.nohoverpreview.enabled"/>
+    <vbox style="margin-inline-start: 22px;">
+      <checkbox id="nhp-internal" label="Internal links (page / TOC / figure previews)" preference="extensions.zotero.nohoverpreview.block.internalLink"/>
+      <checkbox id="nhp-citation" label="Citations (in-text citation → reference popups)" preference="extensions.zotero.nohoverpreview.block.citation"/>
+      <checkbox id="nhp-reference" label="References (bibliography entry popups)" preference="extensions.zotero.nohoverpreview.block.reference"/>
+      <checkbox id="nhp-footnote" label="Footnotes (EPUB / snapshot footnote popups)" preference="extensions.zotero.nohoverpreview.block.footnote"/>
+    </vbox>
+    <description style="margin-top: 8px;">Clicking a link still navigates to its target. Changes take effect immediately.</description>
+  </groupbox>
+</vbox>

@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "No Hover Preview",
+  "version": "1.0.0",
+  "description": "Stops the Zotero reader from popping up link, citation, reference and footnote previews when you hover over them.",
+  "author": "Josh Glazer",
+  "homepage_url": "https://github.com/jsglazer/no-hover-preview",
+  "applications": {
+    "zotero": {
+      "id": "no-hover-preview@jsglazer.com",
+      "update_url": "https://github.com/jsglazer/no-hover-preview/releases/download/release/update.json",
+      "strict_min_version": "7.0",
+      "strict_max_version": "10.*"
+    }
+  }
+}
